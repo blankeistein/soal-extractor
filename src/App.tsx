@@ -71,14 +71,13 @@ const ExtractionTool = () => {
       // Validasi tipe file yang didukung
       const validTypes = [
         "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" // DOCX
       ];
 
       if (!validTypes.includes(file.type)) {
-        throw new Error("Format file tidak didukung. Gunakan .docx atau .pdf");
+        throw new Error("Format file tidak didukung. Gunakan .pdf");
       }
 
-      // 🚀 Direct Base64 Conversion untuk PDF & DOCX
+      // 🚀 Direct Base64 Conversion untuk PDF
       const base64 = await fileToBase64(file);
 
       setFilePayload({
@@ -255,7 +254,7 @@ const ExtractionTool = () => {
                 </h1>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="bg-black dark:bg-white text-white dark:text-black text-xs font-bold px-2 py-0.5">V3.0</span>
-                  <p className="text-sm font-bold opacity-70">Direct DOCX/PDF</p>
+                  <p className="text-sm font-bold opacity-70">Direct PDF</p>
                 </div>
               </div>
             </div>
@@ -296,7 +295,7 @@ const ExtractionTool = () => {
               <div className="relative group flex-1 min-h-[250px]">
                 <input
                   type="file"
-                  accept=".docx, .pdf"
+                  accept=".pdf"
                   onChange={handleFileUpload}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                   disabled={isProcessingFile}
@@ -332,7 +331,7 @@ const ExtractionTool = () => {
                       </div>
                       <div>
                         <p className="text-xl font-black mb-1 uppercase">Drop File Here</p>
-                        <p className="font-bold opacity-60">PDF or DOCX</p>
+                        <p className="font-bold opacity-60">PDF</p>
                       </div>
                     </>
                   )}
