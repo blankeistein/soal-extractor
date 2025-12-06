@@ -14,7 +14,8 @@ import {
   FileType,
   Moon,
   Sun,
-  Coffee
+  Coffee,
+  Settings
 } from 'lucide-react';
 
 type FilePayloadType = {
@@ -35,8 +36,14 @@ const ExtractionTool = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   // ⚙️ Configuration
+  // ⚙️ Configuration
   const MODEL_NAME = "gemini-2.5-flash-preview-09-2025";
-  const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
+  const [showSettings, setShowSettings] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem("gemini_api_key", apiKey);
+  }, [apiKey]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDarkMode);
@@ -138,8 +145,12 @@ const ExtractionTool = () => {
     }
 
     try {
+      if (!apiKey) {
+        throw new Error("API Key belum disetting. Silakan buka menu Settings ⚙️");
+      }
+
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -259,17 +270,26 @@ const ExtractionTool = () => {
               </div>
             </div>
 
-            <button
-              onClick={() => setIsDarkMode(prev => !prev)}
-              className={btnIconClass}
-              title="Toggle Theme"
-            >
-              {
-                isDarkMode ?
-                  <Sun size={24} strokeWidth={2.5} /> :
-                  <Moon size={24} strokeWidth={2.5} />
-              }
-            </button>
+            <div className='flex items-center gap-2 ml-auto'>
+              <button
+                onClick={() => setIsDarkMode(prev => !prev)}
+                className={btnIconClass}
+                title="Toggle Theme"
+              >
+                {
+                  isDarkMode ?
+                    <Sun size={24} strokeWidth={2.5} /> :
+                    <Moon size={24} strokeWidth={2.5} />
+                }
+              </button>
+              <button
+                onClick={() => setShowSettings(true)}
+                className={btnIconClass}
+                title="API Settings"
+              >
+                <Settings size={24} strokeWidth={2.5} />
+              </button>
+            </div>
           </header>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1">
@@ -423,6 +443,54 @@ const ExtractionTool = () => {
           </div>
         </footer>
       </div>
+
+      {/* ⚙️ Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className={`${boxClass} w-full max-w-md p-6 relative`}>
+            <div className="flex justify-between items-center mb-6 border-b-2 border-black dark:border-white pb-2">
+              <h2 className="text-2xl font-black uppercase flex items-center gap-2">
+                <Settings className="animate-spin-slow" />
+                Configuration
+              </h2>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="hover:rotate-90 transition-transform p-1"
+              >
+                <div className="w-6 h-6 flex items-center justify-center font-bold text-xl relative">
+                  <div className="absolute w-full h-0.5 bg-current rotate-45"></div>
+                  <div className="absolute w-full h-0.5 bg-current -rotate-45"></div>
+                </div>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block font-bold text-sm mb-2 uppercase">Gemini API Key</label>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Paste your API Key here..."
+                  className="w-full p-4 border-2 border-black dark:border-white bg-white dark:bg-zinc-800 focus:outline-none focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] transition-shadow font-mono"
+                />
+                <p className="text-xs mt-2 opacity-70">
+                  Key will be stored locally in your browser.
+                </p>
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className={`${btnPrimaryClass} flex-1`}
+                >
+                  SAVE & CLOSE
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
