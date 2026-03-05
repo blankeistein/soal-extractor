@@ -1,183 +1,102 @@
-import React, { useEffect, useState } from 'react';
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
-  Code,
-  FileJson,
-  Copy,
-  Trash2,
-  Zap,
-  Loader2,
-  CheckCircle,
-  AlertCircle,
-  Download,
-  Upload,
-  FileText,
-  FileType,
-  Moon,
-  Sun,
-  Coffee,
-  Settings
-} from 'lucide-react';
+  Upload, FileText, Copy, Download, Settings, Sun, Moon,
+  X, CheckCircle, AlertCircle, Loader2, Zap, Trash2, Save
+} from "lucide-react";
 
-type FilePayloadType = {
-  data: string;
-  mimeType: string;
-}
+const MODEL = "gemini-2.5-flash-preview-05-20";
+const SYSTEM_PROMPT = `Kamu adalah parser soal ujian yang sangat teliti.
+Tugasmu: Analisis input (dokumen PDF) dan ekstrak soal beserta pilihan jawabannya.
+Output WAJIB JSON Array murni tanpa markdown.
+Format JSON Target:
+[
+  {
+    "question": "Pertanyaan...",
+    "answers": ["a. A", "b. B", "c. C", "d. D"]
+  }
+]`;
 
-const ExtractionTool = () => {
-  const [filePayload, setFilePayload] = useState<FilePayloadType | null>(null);
-  const [jsonOutput, setJsonOutput] = useState(null);
+export default function App() {
+  const [filePayload, setFilePayload] = useState<{ data: string; mimeType: string } | null>(null);
+  const [jsonOutput, setJsonOutput] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
-  const [fileName, setFileName] = useState('');
-
-  // 🌓 Theme State (Default Light ☀️)
+  const [fileName, setFileName] = useState("");
   const [isDarkMode, setIsDarkMode] = useState(false);
-
-  // ⚙️ Configuration
-  // ⚙️ Configuration
-  const MODEL_NAME = "gemini-2.5-flash-preview-09-2025";
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
   const [showSettings, setShowSettings] = useState(false);
+  const [tempApiKey, setTempApiKey] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    localStorage.setItem("gemini_api_key", apiKey);
-  }, [apiKey]);
+    if (showSettings) setTempApiKey(apiKey);
+  }, [showSettings]);
 
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", isDarkMode);
-  }, [isDarkMode]);
-
-  // 🔄 Helper: Convert File to Base64
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        // Remove prefix data url (e.g., "data:application/pdf;base64,")
-        const base64Data = reader.result?.toString().split(',')[1] || "";
-        resolve(base64Data);
-      };
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
-  // 📂 Logic Handle File Upload
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsProcessingFile(true);
-    setError(null);
-    setFileName(file.name);
-    setJsonOutput(null);
-    setFilePayload(null);
-
-    try {
-      // Validasi tipe file yang didukung
-      const validTypes = [
-        "application/pdf",
-      ];
-
-      if (!validTypes.includes(file.type)) {
-        throw new Error("Format file tidak didukung. Gunakan .pdf");
-      }
-
-      // 🚀 Direct Base64 Conversion untuk PDF
-      const base64 = await fileToBase64(file);
-
-      setFilePayload({
-        mimeType: file.type,
-        data: base64
-      });
-
-    } catch (err: unknown) {
-      console.error(err);
-      if (err instanceof Error) {
-        setError(err.message || "Gagal memproses file.");
-      }
-      setFileName('');
-      setFilePayload(null);
-    } finally {
-      setIsProcessingFile(false);
-      e.target.value = "";
-    }
-  };
-
-  const handleExtract = async () => {
-    if (!filePayload) {
-      setError("Upload file terlebih dahulu.");
+  const processFile = useCallback((file: File) => {
+    if (file.type !== "application/pdf") {
+      setError("Format file tidak didukung. Harap upload file .pdf");
       return;
     }
+    setIsProcessingFile(true);
+    setError(null);
+    setJsonOutput(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = (e.target?.result as string).split(",")[1];
+      setFilePayload({ data: base64, mimeType: "application/pdf" });
+      setFileName(file.name);
+      setIsProcessingFile(false);
+    };
+    reader.onerror = () => {
+      setError("Gagal membaca file.");
+      setIsProcessingFile(false);
+    };
+    reader.readAsDataURL(file);
+  }, []);
 
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  }, [processFile]);
+
+  const handleExtract = async () => {
+    if (!apiKey) { setError("API Key belum diisi. Buka Settings ⚙️ untuk menyimpan API Key."); return; }
+    if (!filePayload) { setError("Upload file PDF terlebih dahulu."); return; }
     setIsLoading(true);
     setError(null);
     setJsonOutput(null);
-
-    const systemPrompt = `
-      Kamu adalah parser soal ujian yang sangat teliti.
-      Tugasmu: Analisis input (dokumen PDF/DOCX) dan ekstrak soal beserta pilihan jawabannya.
-      Output WAJIB JSON Array murni tanpa markdown.
-      
-      Format JSON Target:
-      [
-        {
-          "question": "Pertanyaan...",
-          "answers": ["a. A", "b. B", "c. C", "d. D"]
-        }
-      ]
-    `;
-
-    const contentParts = [];
-
-    // Instruksi utama
-    contentParts.push({ text: "Tolong ekstrak soal dari dokumen ini menjadi JSON." });
-
-    // File Payload (PDF atau DOCX)
-    if (filePayload) {
-      contentParts.push({
-        inlineData: {
-          mimeType: filePayload.mimeType,
-          data: filePayload.data
-        }
-      });
-    }
-
     try {
-      if (!apiKey) {
-        throw new Error("API Key belum disetting. Silakan buka menu Settings ⚙️");
-      }
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: contentParts }],
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            generationConfig: { responseMimeType: "application/json" }
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error?.message || "Gagal menghubungi Gemini API");
-      }
-
-      const data = await response.json();
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!rawText) throw new Error("Tidak ada output dari model.");
-
-      const cleanedText = rawText.replace(/```json|```/g, '').trim();
-      const parsedJson = JSON.parse(cleanedText);
-      setJsonOutput(parsedJson);
-
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
+      const body = {
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: filePayload.mimeType, data: filePayload.data } },
+            { text: "Ekstrak semua soal dari dokumen ini." }
+          ]
+        }],
+        generationConfig: { responseMimeType: "application/json" }
+      };
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message || "Request gagal");
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error("Model tidak menghasilkan output.");
+      const parsed = JSON.parse(text);
+      setJsonOutput(JSON.stringify(parsed, null, 2));
     } catch (err: unknown) {
       if (err instanceof Error) {
-        setError(err.message);
+        setError(err.message || "Terjadi kesalahan.");
       }
     } finally {
       setIsLoading(false);
@@ -186,313 +105,255 @@ const ExtractionTool = () => {
 
   const handleCopy = () => {
     if (!jsonOutput) return;
-    const text = JSON.stringify(jsonOutput, null, 2);
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    document.body.appendChild(textArea);
-    textArea.select();
-    try {
-      document.execCommand('copy');
-      setCopySuccess(true);
-      setTimeout(() => setCopySuccess(false), 2000);
-    } catch (err) {
-      console.error('Fallback copy failed', err);
-    }
-    document.body.removeChild(textArea);
+    navigator.clipboard.writeText(jsonOutput);
+    setCopySuccess(true);
+    setTimeout(() => setCopySuccess(false), 2000);
   };
 
   const handleDownload = () => {
     if (!jsonOutput) return;
-    const blob = new Blob([JSON.stringify(jsonOutput, null, 2)], { type: "application/json" });
+    const blob = new Blob([jsonOutput], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${fileName}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `soal_${fileName.replace(".pdf", "")}_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleClear = () => {
     setFilePayload(null);
     setJsonOutput(null);
     setError(null);
-    setFileName('');
+    setFileName("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const boxClass = `
-    bg-white dark:bg-zinc-900 
-    border-2 border-black dark:border-white 
-    shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]
-    transition-all duration-300
-  `;
+  const handleSaveSettings = () => {
+    localStorage.setItem("gemini_api_key", tempApiKey);
+    setApiKey(tempApiKey);
+    setShowSettings(false);
+  };
 
-  const btnPrimaryClass = `
-    w-full py-4 font-bold border-2 border-black dark:border-white
-    bg-yellow-400 dark:bg-pink-600 text-black dark:text-white
-    shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]
-    hover:translate-x-[2px] hover:translate-y-[2px] 
-    hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[2px_2px_0px_0px_rgba(255,255,255,1)]
-    active:translate-x-[4px] active:translate-y-[4px] active:shadow-none
-    disabled:opacity-50 disabled:cursor-not-allowed disabled:active:translate-x-0 disabled:active:translate-y-0
-    transition-all flex items-center justify-center gap-2
-  `;
-
-  const btnIconClass = `
-    p-2 border-2 border-black dark:border-white 
-    bg-white dark:bg-zinc-800 text-black dark:text-white
-    shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_0px_rgba(255,255,255,1)]
-    hover:translate-x-[1px] hover:translate-y-[1px] 
-    hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[2px_2px_0px_0px_rgba(255,255,255,1)]
-    active:shadow-none active:translate-x-[3px] active:translate-y-[3px]
-    transition-all disabled:opacity-50
-  `;
+  const bg = isDarkMode ? "bg-zinc-950 text-white" : "bg-amber-50 text-black";
+  const cardClass = isDarkMode
+    ? "bg-zinc-900 border-2 border-white shadow-[4px_4px_0px_0px_rgba(255,255,255,0.8)]"
+    : "bg-white border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]";
+  const btnPrimary = isDarkMode
+    ? "bg-pink-600 hover:bg-pink-500 border-2 border-white text-white shadow-[4px_4px_0px_0px_rgba(255,255,255,0.8)] active:translate-x-1 active:translate-y-1 active:shadow-none"
+    : "bg-yellow-400 hover:bg-yellow-300 border-2 border-black text-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-1 active:translate-y-1 active:shadow-none";
+  const btnIcon = isDarkMode
+    ? "bg-zinc-800 border-2 border-white hover:bg-zinc-700 shadow-[2px_2px_0px_0px_rgba(255,255,255,0.6)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+    : "bg-white border-2 border-black hover:bg-gray-100 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none";
 
   return (
-    <>
-      <div className="min-h-screen font-mono transition-colors duration-300 bg-amber-50 dark:bg-zinc-950 text-black dark:text-white p-4 md:p-8 flex flex-col">
-        <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col">
-
-          {/* Header Section */}
-          <header className="mb-10 flex flex-col md:flex-row items-center justify-between gap-4 pb-6 border-b-4 border-black dark:border-white">
-            <div className="flex items-center gap-4">
-              <div className="p-1 border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">
-                <img src="/icon.png" className='w-12 h-12' />
-              </div>
-              <div>
-                <h1 className="text-3xl md:text-4xl font-black tracking-tighter uppercase italic">
-                  SOAL<span className="text-blue-600 dark:text-purple-400">Extractor</span>
-                </h1>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="bg-black dark:bg-white text-white dark:text-black text-xs font-bold px-2 py-0.5">V3.0</span>
-                  <p className="text-sm font-bold opacity-70">Direct PDF</p>
-                </div>
-              </div>
+    <div className={`min-h-screen font-mono ${bg} transition-colors duration-200`}>
+      {/* Header */}
+      <header className={`sticky top-0 z-10 ${isDarkMode ? "bg-zinc-950 border-b-2 border-white" : "bg-amber-50 border-b-2 border-black"} px-4 py-3`}>
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 flex items-center justify-center ${isDarkMode ? "bg-pink-600 border-2 border-white" : "bg-yellow-400 border-2 border-black"} shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]`}>
+              <Zap size={18} className="text-black" />
             </div>
-
-            <div className='flex items-center gap-2 ml-auto'>
-              <button
-                onClick={() => setIsDarkMode(prev => !prev)}
-                className={btnIconClass}
-                title="Toggle Theme"
-              >
-                {
-                  isDarkMode ?
-                    <Sun size={24} strokeWidth={2.5} /> :
-                    <Moon size={24} strokeWidth={2.5} />
-                }
-              </button>
-              <button
-                onClick={() => setShowSettings(true)}
-                className={btnIconClass}
-                title="API Settings"
-              >
-                <Settings size={24} strokeWidth={2.5} />
-              </button>
+            <div>
+              <h1 className="text-lg font-black tracking-tight leading-none">SoalExtractor</h1>
+              <p className={`text-xs ${isDarkMode ? "text-zinc-400" : "text-zinc-600"}`}>PDF → JSON Converter</p>
             </div>
-          </header>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1">
-
-            {/* LEFT: Input Area */}
-            <div className={`${boxClass} p-6 flex flex-col gap-6 h-full`}>
-              <div className="flex justify-between items-center border-b-2 border-black dark:border-white pb-4">
-                <div className="flex items-center gap-2 font-black text-xl uppercase">
-                  <FileJson strokeWidth={2.5} />
-                  <h3>Source</h3>
-                </div>
-                {(fileName || filePayload) && (
-                  <button
-                    onClick={handleClear}
-                    className="text-sm font-bold text-red-600 dark:text-red-400 hover:underline flex items-center gap-1"
-                  >
-                    <Trash2 size={16} /> CLEAR
-                  </button>
-                )}
-              </div>
-
-              {/* Dropzone Area */}
-              <div className="relative group flex-1 min-h-[250px]">
-                <input
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleFileUpload}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                  disabled={isProcessingFile}
-                />
-                <div className={`
-                  w-full h-full border-4 border-dashed border-black dark:border-white 
-                  transition-all flex flex-col items-center justify-center gap-4 text-center p-6
-                  ${isProcessingFile ? 'bg-gray-100 dark:bg-zinc-800' : 'hover:bg-yellow-100 dark:hover:bg-pink-900/20'}
-                  ${(filePayload || fileName) ? 'bg-blue-50 dark:bg-purple-900/20 border-solid' : ''}
-                `}>
-                  {isProcessingFile ? (
-                    <div className="flex flex-col items-center gap-3">
-                      <Loader2 className="animate-spin" size={40} strokeWidth={2.5} />
-                      <span className="font-bold text-lg">UPLOADING...</span>
-                    </div>
-                  ) : fileName ? (
-                    <div className="flex flex-col items-center gap-4">
-                      <div className={`p-4 border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] ${fileName.endsWith('.pdf') ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'}`}>
-                        {fileName.endsWith('.pdf') ? <FileType size={40} strokeWidth={2.5} /> : <FileText size={40} strokeWidth={2.5} />}
-                      </div>
-                      <div>
-                        <p className="text-xl font-black truncate max-w-[250px] uppercase">{fileName}</p>
-                        <p className="text-sm font-bold text-green-600 dark:text-green-400 mt-2 flex items-center justify-center gap-1 bg-black/5 dark:bg-white/10 py-1 px-3 rounded-full">
-                          <CheckCircle size={14} />
-                          READY
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="p-4 bg-white dark:bg-zinc-800 border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">
-                        <Upload size={32} strokeWidth={2.5} />
-                      </div>
-                      <div>
-                        <p className="text-xl font-black mb-1 uppercase">Drop File Here</p>
-                        <p className="font-bold opacity-60">PDF</p>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {error && (
-                <div className="bg-red-100 dark:bg-red-900/30 border-2 border-red-600 dark:border-red-400 text-red-700 dark:text-red-300 p-4 font-bold flex items-center gap-3">
-                  <AlertCircle size={24} />
-                  {error}
-                </div>
-              )}
-
-              <button
-                onClick={handleExtract}
-                disabled={isLoading || !filePayload}
-                className={btnPrimaryClass}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="animate-spin" size={24} />
-                    <span>PROCESSING...</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap size={24} fill="currentColor" />
-                    <span>EXTRACT TO JSON</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* RIGHT: Output Area */}
-            <div className={`${boxClass} p-6 flex flex-col gap-6 h-full relative`}>
-              <div className="flex justify-between items-center border-b-2 border-black dark:border-white pb-4 z-10">
-                <div className="flex items-center gap-2 font-black text-xl uppercase text-green-600 dark:text-green-400">
-                  <Code strokeWidth={2.5} />
-                  <h3>Result</h3>
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleDownload}
-                    disabled={!jsonOutput}
-                    className={btnIconClass}
-                    title="Download .json"
-                  >
-                    <Download size={20} strokeWidth={2.5} />
-                  </button>
-                  <button
-                    onClick={handleCopy}
-                    disabled={!jsonOutput}
-                    className={`${btnIconClass} flex items-center gap-2 px-4`}
-                  >
-                    {copySuccess ? <CheckCircle size={20} /> : <Copy size={20} strokeWidth={2.5} />}
-                    <span className="hidden md:inline font-bold">{copySuccess ? 'OK!' : 'COPY'}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex-1 relative bg-gray-100 dark:bg-zinc-950 border-2 border-black dark:border-white overflow-hidden max-h-[520px]">
-                {!jsonOutput ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center opacity-40">
-                    <div className="w-20 h-20 border-4 border-dashed border-current flex items-center justify-center mb-4 rounded-full">
-                      <Code size={40} />
-                    </div>
-                    <p className="font-bold uppercase">No Data Yet</p>
-                  </div>
-                ) : (
-                  <pre className="w-full h-full p-6 overflow-auto custom-scrollbar text-sm font-bold leading-relaxed">
-                    <code className="language-json">
-                      {JSON.stringify(jsonOutput, null, 2)}
-                    </code>
-                  </pre>
-                )}
-              </div>
-            </div>
-
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={handleClear} className={`p-2 rounded-none transition-all ${btnIcon}`} title="Clear">
+              <Trash2 size={16} />
+            </button>
+            <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-2 rounded-none transition-all ${btnIcon}`}>
+              {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+            <button onClick={() => setShowSettings(true)} className={`p-2 rounded-none transition-all ${btnIcon}`}>
+              <Settings size={16} />
+            </button>
           </div>
         </div>
+      </header>
 
-        {/* ☕ Footer Area */}
-        <footer className="mt-12 py-6 border-t-4 border-black dark:border-white text-center">
-          <div className="inline-flex items-center gap-2 px-6 py-3 bg-white dark:bg-zinc-900 border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] font-black uppercase tracking-wider transform hover:-rotate-2 transition-transform cursor-default">
-            <span>Made with</span>
-            <span className="text-red-500 animate-pulse">❤️</span>
-            <span>by Coffee</span>
-            <Coffee size={20} className="text-amber-700 dark:text-amber-500" strokeWidth={3} />
-          </div>
-        </footer>
-      </div>
-
-      {/* ⚙️ Settings Modal */}
-      {showSettings && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className={`${boxClass} w-full max-w-md p-6 relative`}>
-            <div className="flex justify-between items-center mb-6 border-b-2 border-black dark:border-white pb-2">
-              <h2 className="text-2xl font-black uppercase flex items-center gap-2">
-                <Settings className="animate-spin-slow" />
-                Configuration
-              </h2>
-              <button
-                onClick={() => setShowSettings(false)}
-                className="hover:rotate-90 transition-transform p-1"
-              >
-                <div className="w-6 h-6 flex items-center justify-center font-bold text-xl relative">
-                  <div className="absolute w-full h-0.5 bg-current rotate-45"></div>
-                  <div className="absolute w-full h-0.5 bg-current -rotate-45"></div>
-                </div>
-              </button>
+      {/* Main */}
+      <main className="max-w-7xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-[calc(100vh-120px)]">
+        {/* Left Panel */}
+        <div className="flex flex-col gap-4">
+          <div className={`p-4 ${cardClass}`}>
+            <div className="flex items-center gap-2 mb-3">
+              <Upload size={16} />
+              <span className="font-black text-sm uppercase tracking-widest">Upload PDF</span>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block font-bold text-sm mb-2 uppercase">Gemini API Key</label>
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="Paste your API Key here..."
-                  className="w-full p-4 border-2 border-black dark:border-white bg-white dark:bg-zinc-800 focus:outline-none focus:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:focus:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] transition-shadow font-mono"
-                />
-                <p className="text-xs mt-2 opacity-70">
-                  Key will be stored locally in your browser.
-                </p>
-              </div>
+            {/* Dropzone */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`relative cursor-pointer border-2 border-dashed transition-all p-8 text-center
+                ${isDragging
+                  ? isDarkMode ? "border-pink-400 bg-pink-900/20" : "border-yellow-500 bg-yellow-100"
+                  : isDarkMode ? "border-zinc-600 hover:border-pink-400 hover:bg-pink-900/10" : "border-zinc-400 hover:border-black hover:bg-yellow-50"
+                }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); }}
+              />
+              {isProcessingFile ? (
+                <div className="flex flex-col items-center gap-2">
+                  <Loader2 size={32} className="animate-spin" />
+                  <p className="text-sm font-bold">Memproses file...</p>
+                </div>
+              ) : filePayload ? (
+                <div className="flex flex-col items-center gap-2">
+                  <div className={`p-3 ${isDarkMode ? "bg-pink-600 border-2 border-white" : "bg-yellow-400 border-2 border-black"}`}>
+                    <FileText size={24} />
+                  </div>
+                  <p className="font-black text-sm break-all">{fileName}</p>
+                  <span className={`text-xs font-black px-2 py-0.5 ${isDarkMode ? "bg-green-500 text-black" : "bg-green-400 border border-black text-black"}`}>
+                    ✓ READY
+                  </span>
+                  <p className={`text-xs ${isDarkMode ? "text-zinc-400" : "text-zinc-500"}`}>Klik untuk ganti file</p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-3">
+                  <div className={`p-3 ${isDarkMode ? "border-2 border-zinc-600" : "border-2 border-zinc-300"}`}>
+                    <Upload size={28} className={isDarkMode ? "text-zinc-400" : "text-zinc-500"} />
+                  </div>
+                  <div>
+                    <p className="font-black text-sm">Drag & Drop PDF di sini</p>
+                    <p className={`text-xs mt-1 ${isDarkMode ? "text-zinc-400" : "text-zinc-500"}`}>atau klik untuk browse</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
 
-              <div className="flex gap-2 pt-4">
+          {/* Error */}
+          {error && (
+            <div className="flex items-start gap-2 p-3 bg-red-100 border-2 border-red-600 shadow-[4px_4px_0px_0px_rgba(220,38,38,1)]">
+              <AlertCircle size={16} className="text-red-600 mt-0.5 shrink-0" />
+              <p className="text-red-800 text-sm font-bold">{error}</p>
+            </div>
+          )}
+
+          {/* Extract Button */}
+          <button
+            onClick={handleExtract}
+            disabled={isLoading || !filePayload}
+            className={`w-full py-3 font-black text-sm uppercase tracking-widest transition-all flex items-center justify-center gap-2
+              ${isLoading || !filePayload
+                ? isDarkMode ? "bg-zinc-700 border-2 border-zinc-600 text-zinc-500 cursor-not-allowed" : "bg-zinc-200 border-2 border-zinc-400 text-zinc-400 cursor-not-allowed"
+                : btnPrimary
+              }`}
+          >
+            {isLoading ? (
+              <><Loader2 size={16} className="animate-spin" /> Mengekstrak...</>
+            ) : (
+              <><Zap size={16} /> Ekstrak Soal</>
+            )}
+          </button>
+        </div>
+
+        {/* Right Panel */}
+        <div className={`flex flex-col ${cardClass}`}>
+          <div className={`flex items-center justify-between p-3 border-b-2 ${isDarkMode ? "border-white" : "border-black"}`}>
+            <div className="flex items-center gap-2">
+              <FileText size={16} />
+              <span className="font-black text-sm uppercase tracking-widest">JSON Output</span>
+            </div>
+            {jsonOutput && (
+              <div className="flex gap-2">
                 <button
-                  onClick={() => setShowSettings(false)}
-                  className={`${btnPrimaryClass} flex-1`}
+                  onClick={handleCopy}
+                  className={`flex items-center gap-1 px-2 py-1 text-xs font-black transition-all ${btnIcon}`}
                 >
-                  SAVE & CLOSE
+                  {copySuccess ? <CheckCircle size={12} className="text-green-500" /> : <Copy size={12} />}
+                  {copySuccess ? "COPIED!" : "COPY"}
+                </button>
+                <button
+                  onClick={handleDownload}
+                  className={`flex items-center gap-1 px-2 py-1 text-xs font-black transition-all ${btnIcon}`}
+                >
+                  <Download size={12} /> DOWNLOAD
                 </button>
               </div>
+            )}
+          </div>
+          <div className="flex-1 overflow-auto p-3">
+            {isLoading ? (
+              <div className="h-full flex flex-col items-center justify-center gap-3">
+                <Loader2 size={32} className="animate-spin" />
+                <p className="font-black text-sm">Menghubungi Gemini API...</p>
+                <p className={`text-xs ${isDarkMode ? "text-zinc-400" : "text-zinc-500"}`}>Mohon tunggu sebentar</p>
+              </div>
+            ) : jsonOutput ? (
+              <pre className={`text-xs leading-relaxed whitespace-pre-wrap break-all ${isDarkMode ? "text-green-400" : "text-black"}`}>
+                {jsonOutput}
+              </pre>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center gap-2 opacity-40">
+                <div className={`p-4 border-2 ${isDarkMode ? "border-zinc-600" : "border-zinc-300"}`}>
+                  <FileText size={32} className={isDarkMode ? "text-zinc-500" : "text-zinc-400"} />
+                </div>
+                <p className="font-black text-sm">Belum ada output</p>
+                <p className={`text-xs ${isDarkMode ? "text-zinc-500" : "text-zinc-400"}`}>Upload PDF dan klik Ekstrak Soal</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className={`text-center py-3 text-xs font-bold ${isDarkMode ? "text-zinc-500 border-t-2 border-zinc-800" : "text-zinc-500 border-t-2 border-zinc-200"}`}>
+        Made with ❤️ by Coffee ☕
+      </footer>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className={`w-full max-w-md ${isDarkMode ? "bg-zinc-900 border-2 border-white shadow-[8px_8px_0px_0px_rgba(255,255,255,0.8)]" : "bg-white border-2 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]"}`}>
+            <div className={`flex items-center justify-between p-4 border-b-2 ${isDarkMode ? "border-white" : "border-black"}`}>
+              <div className="flex items-center gap-2">
+                <Settings size={16} />
+                <span className="font-black text-sm uppercase tracking-widest">Settings</span>
+              </div>
+              <button onClick={() => setShowSettings(false)} className={`p-1 transition-all ${btnIcon}`}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 flex flex-col gap-4">
+              <div>
+                <label className="block font-black text-xs uppercase tracking-widest mb-2">Gemini API Key</label>
+                <input
+                  type="password"
+                  value={tempApiKey}
+                  onChange={(e) => setTempApiKey(e.target.value)}
+                  placeholder="AIza..."
+                  className={`w-full px-3 py-2 font-mono text-sm border-2 outline-none transition-all
+                    ${isDarkMode
+                      ? "bg-zinc-800 border-white text-white placeholder:text-zinc-500 focus:border-pink-400"
+                      : "bg-white border-black text-black placeholder:text-zinc-400 focus:border-yellow-500"
+                    }`}
+                />
+                <p className={`text-xs mt-1 ${isDarkMode ? "text-zinc-400" : "text-zinc-500"}`}>
+                  Dapatkan API key di <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer" className="underline font-bold">aistudio.google.com</a>
+                </p>
+              </div>
+              <button
+                onClick={handleSaveSettings}
+                className={`w-full py-3 font-black text-sm uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${btnPrimary}`}
+              >
+                <Save size={16} /> Save & Close
+              </button>
             </div>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
-};
-
-export default ExtractionTool;
+}
